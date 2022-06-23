@@ -1,0 +1,173 @@
+from ngsolve import *
+from netgen.geom2d import unit_square
+from netgen.csg import *
+import matplotlib.pyplot as plt
+from prol import *
+from mymg import *
+from ngsolve.la import EigenValues_Preconditioner
+from ngsolve.krylovspace import CGSolver
+
+
+# ==========coefficients==========
+import sys
+dim = int(sys.argv[1])
+smStep = int(sys.argv[2])
+block = int(sys.argv[3])
+gaussSm = int(sys.argv[4])
+# ===============================
+smType = 'gs' if gaussSm else 'jc'
+if dim == 2:
+    mesh = Mesh(unit_square.GenerateMesh(maxh=1/4))
+    maxdofs=3e6
+else:
+    mesh = Mesh(unit_cube.GenerateMesh(maxh=1/4))
+    maxdofs=3e6
+ne = mesh.ne
+
+# HDG
+V = VectorL2(mesh) 
+W = L2(mesh, order=1)
+M = FacetFESpace(mesh, dirichlet='.*')
+fes = M*V*W
+et = meshTopology(mesh, mesh.dim)
+et.Update() 
+if mesh.dim==2:
+    prol = FacetProlongationTrig(mesh, et) 
+else:
+    prol = FacetProlongationTet(mesh, et) 
+
+n = specialcf.normal(mesh.dim) 
+h = specialcf.mesh_size
+alpha = 1
+a = BilinearForm(fes, symmetric=False, condense=True)
+# non-variant coefficient auxiliary operator
+a_ax = BilinearForm(fes, symmetric=False, condense=True)
+(uhat, q, u),(vhat,r, v) = fes.TnT()  
+
+# set diffusion and reaction coeff to be 1
+lam = CoefficientFunction(1 + 1/2 * sin (x) * sin(y))
+c_rac = CoefficientFunction(1 + 1/2 * sin(x) * sin(y))
+
+# true original operator
+if mesh.dim == 3:
+    ir_c = IntegrationRule(points = [(1/3, 1/3, 0), (1/3, 0, 1/3), (0, 1/3, 1/3), (1/3, 1/3, 1/3)],
+                           weights = [1/16, 1/16, 1/16, 1/16])
+    a += (1/lam * q * r + c_rac * u * v) * dx(intrules = {QUAD:ir_c})
+    a_ax += (1/lam * q * r) * dx(intrules = {QUAD:ir_c})
+elif mesh.dim == 2:
+    ir_c = IntegrationRule(points = [(0.5, 0), (0, 0.5), (0.5, 0.5)],
+                           weights= [1/6, 1/6, 1/6])
+    a += (1/lam * q * r + c_rac * u * v) * dx(intrules = {TRIG:ir_c})
+    a_ax += (1/lam * q * r) * dx(intrules = {TRIG:ir_c})
+# for auxiliary operator, one-point integration
+# on boundaries to replace reaction integration term over elements
+if mesh.dim ==2:
+    ir = IntegrationRule(SEGM, 1) 
+    a += (-uhat*r*n+q*n*vhat
+          + lam*alpha/h*(u-uhat)*(v-vhat))*dx(element_boundary=True,
+                                         intrules={SEGM:ir})
+    a_ax += (c_rac * h / 3 * uhat * vhat
+             -uhat*r*n+q*n*vhat
+          + lam*alpha/h*(u-uhat)*(v-vhat))*dx(element_boundary=True,
+                                          intrules={SEGM:ir})
+else:
+    ir = IntegrationRule(TRIG, 1)
+    a += (-uhat*r*n+q*n*vhat
+          + lam*alpha/h*(u-uhat)*(v-vhat))*dx(element_boundary=True,
+                                          intrules={TRIG:ir})
+    a_ax += (c_rac * h / 4 * uhat * vhat
+             -uhat*r*n+q*n*vhat
+          + lam*alpha/h*(u-uhat)*(v-vhat))*dx(element_boundary=True,
+                                          intrules={TRIG:ir})
+
+f = LinearForm(fes)
+if dim == 2:
+    f += ((1 + 1/2 * sin(x) * sin(y)) * (16 * (x - x**2) * (y - y**2)) * v
+          + 32 * (y - y**2) * v
+          - 8 * sin(y) * (y - y**2) * (cos(x) * (1 - 2 * x) - 2 * sin(x)) * v
+          + 32 * (x - x**2) * v
+          - 8 * sin(x) * (x - x**2) * (cos(y) * (1 - 2 * y) - 2 * sin(y)) * v) * dx(intrules = {TRIG:ir_c})
+    # exact solution
+    u_exact = 16 * x * (1 - x) * y * (1 - y)
+    q_exact = CF((1 + 1/2 * sin(x) * sin(y)) * (16 * (y - y**2) * (1 - 2 * x), 16 * (x - x**2) * (1 - 2 * y)))
+elif dim == 3:
+    f += ((1 + 1/2 * sin(x) * sin(y)) * 16 * (x - x**2) * (y - y**2) * (z - z**2) * v
+          + 32 * (y - y**2) * (z - z**2) * v
+          - 8 * sin(y) * (y - y**2) * (z - z**2) * (cos(x) * (1 - 2 * x) - 2 * sin(x)) * v
+          + 32 * (x - x**2) * (z - z**2) * v
+          - 8 * sin(x) * (x - x**2) * (z - z**2) * (cos(y) * (1 - 2 * y) - 2 * sin(y)) * v
+          + 32 * (x - x**2) * (y - y**2) * v
+          + 16 * sin(x) * sin(y) * (x - x**2) * (y - y**2) * v) * dx(intrules = {QUAD:ir_c})
+    u_exact = 16 * x * (1- x) * y * (1 - y) * z * (1 - z)
+    q_exact = CF((1 + 1/2 * sin(x) * sin(y)) * (16 * (y - y**2) * (z - z**2) * (1 - 2 * x), 16 * (x - x**2) * (z - z**2) * (1 - 2 * y), 
+                  16 * (x - x**2) * (y - y**2) * (1 - 2 * z)))
+
+# a.Assemble()
+a_ax.Assemble()
+# =========preconditioner init==============
+pre = MultiGrid(a_ax.mat, prol, nc=M.ndof,
+                coarsedofs=fes.FreeDofs(True), w1=0.3, 
+                nsmooth=smStep, sm=smType, var=False)
+
+gfu = GridFunction(fes)
+uhath, qh, uh = gfu.components
+
+def SolveBVP():
+    fes.Update()
+    gfu.Update()
+    a.Assemble()
+    a_ax.Assemble()
+    f.Assemble()
+    if mesh.ne > ne:
+        et.Update()
+        # ===========point or block============
+        # block
+        if block:
+            pp = [fes.FreeDofs(True), M.ndof, [], VertexPatchBlocks(mesh,M)]
+        # point
+        else:
+            pp = [fes.FreeDofs(True), M.ndof, [], fes.FreeDofs(True)]
+        pre.Update(a_ax.mat, pp)
+    
+    lams = EigenValues_Preconditioner(mat=a.mat, pre=pre)
+    inv = CGSolver(a.mat, pre, printing=False, tol=1e-8, maxiter=100)
+    #inv = a.mat.Inverse(fes.FreeDofs(True))
+    f.vec.data += a.harmonic_extension_trans * f.vec  
+    gfu.vec.data = inv*f.vec
+    it = inv.iterations   
+    #it = 1
+    gfu.vec.data += a.harmonic_extension * gfu.vec 
+    gfu.vec.data += a.inner_solve * f.vec
+    print("IT: ", it, "cond: ", max(lams)/min(lams), "NDOFS: ", M.ndof)
+
+
+# SolveBVP()
+with TaskManager():
+    level = 1
+    prev_uErr, prev_qErr = 0, 0
+    u_rate, q_rate = 0, 0
+    print('==============================')
+    print(f'DIM: {dim}, Smoother Type: {smType}, Smooth Steps: {smStep}, Block Smoother: {block}')
+    print('==============================')
+    while M.ndof < maxdofs:  
+        if dim == 2:
+            mesh.ngmesh.Refine()
+        else:
+            mesh.Refine(onlyonce = True)
+            #mesh.ngmesh.Refine()
+        # NOTE the different refinement!!!
+        meshRate = 2 if dim == 2 else sqrt(2)
+
+        level += 1
+        SolveBVP()
+        # ===== convergence check =====
+        L2_uErr =  sqrt(Integrate((uh - u_exact)*(uh - u_exact), mesh))
+        L2_qErr =  sqrt(Integrate((qh - q_exact)*(qh - q_exact), mesh))
+        if level != 2:
+            u_rate = log(prev_uErr / L2_uErr) / log(meshRate)
+            q_rate = log(prev_qErr / L2_qErr) / log(meshRate)
+        prev_uErr, prev_qErr = L2_uErr, L2_qErr
+        print(f"uh L2-error: {L2_uErr:.3E}, uh conv rate: {u_rate:.2E}")
+        print(f"qh L2-error: {L2_qErr:.3E}, qh conv rate: {q_rate:.2E}")
+        print('==============================')
+
