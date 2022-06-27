@@ -131,8 +131,8 @@ def SolveBVP(level):
     errP0.data = Proj_p * gfu0.vec - pTmp.vec
     for _ in range(8):
         gfu.vec.data = a.mat.Inverse(fes.FreeDofs(), inverse='umfpack') * \
-                        (f.vec - Proj_bd @ p_NC_mix.mat * pTmp.vec)
-        pTmp.vec.data += c_div * pMass_inv @ p_NC_mix.mat.T @ Proj_bd * gfu.vec
+                        (f.vec - p_NC_mix.mat * pTmp.vec)
+        pTmp.vec.data += c_div * pMass_inv @ p_NC_mix.mat.T * gfu.vec
         errP.data = Proj_p * gfu0.vec - pTmp.vec
         # print(f'err P norm: {Norm(errP):.2E}, Err_P norm decrease rate: {Norm(errP) / Norm(errP0):.1E}')
         errP0.data = errP
