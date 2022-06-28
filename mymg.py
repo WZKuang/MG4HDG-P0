@@ -57,12 +57,12 @@ class SymmetricGS(BaseMatrix):
 # multigrid with variable smoothing
 class MultiGrid(BaseMatrix):
     def __init__ (self, mat, prol, coarsedofs, nc, w1=0.9, sm="gs", var=False,
-            nsmooth=1, wcycle=False, he=False, dim = 1, js=False):
+            nsmooth=1, wcycle=False, he=False, dim = 1, js=False, he0 = ()):
         super(MultiGrid, self).__init__()
         self.mats = [mat]
         self.smoothers = [ () ]
         self.activeDofs = [ coarsedofs ]
-        self.he_prol = [ () ]
+        self.he_prol = [ he0 ]
         self.he = he
         self.w1 = w1
         self.js = js
@@ -131,14 +131,22 @@ class MultiGrid(BaseMatrix):
                 tmp.data = b
                 for i in range(ms):
                     rho.data += self.w1*self.smoothers[level]*tmp # jacobi
-                    tmp.data  = b - self.mats[level] * rho
+                    tmp.data = b - self.mats[level] * rho
             
             if self.wcycle>-1:
                # harmonic extension part: update residual???
                if self.he:
+                   if prolType == list: # pressure transform needed
+                       print('WARNING: MIXED MG STILL BUGGY. '
+                             'CORRECT PRESSURE HARMONIC EXTENSION NEEDED.')
+                       uHe_prol = self.he_prol[level][0]
+                       pHe_transf_f = self.he_prol[level][1]
+                       pHe_transf_c = self.he_prol[level - 1][1]
+                   else:
+                       uHe_prol = self.he_prol[level]
                    # here tmp is the residual after smoothing
-                   # tmp0 is the harmonic extension of tmp
-                   tmp0.data = self.he_prol[level] * tmp
+                   # tmp0 is the harmonic extension of tmp (of primal variable u)
+                   tmp0.data = uHe_prol * tmp
                    tmp.data -= self.mats[level] * tmp0
 
                # FIXME: Projector project out inactive dofs on fine level
@@ -171,7 +179,7 @@ class MultiGrid(BaseMatrix):
                   tmpC.data -= self.mats[level-1]*rhoC
                   self.MGM(level-1, tmpC , rhoC0)
                   rhoC.data += rhoC0 #update
-               
+
                if prolType==int: # only one prolongation
                    #  convert rhoC --> to fine grid vector
                    for i in range(self.dim):
@@ -201,13 +209,14 @@ class MultiGrid(BaseMatrix):
                # harmonic extension part
                if self.he:
                    tmp0.data = self.mats[level] * tmp
-                   tmp.data -= self.he_prol[level]* tmp0
-                   #print('new prol working')
+                   tmp.data -= uHe_prol * tmp0
+                   # he has been performed on u_l
+                   # print('new prol working')
 
                rho.data += tmp 
         
             # post-smoothing: m-steps GS/damped Jac
-            if self.sm =="gs": 
+            if self.sm =="gs":
                 for i in range(ms):
                     self.smoothers[level].SmoothBack(rho, b)
             else:
@@ -217,3 +226,4 @@ class MultiGrid(BaseMatrix):
         else:
             # p1 problem on the coarsest mesh
             rho.data = self.invcoarseproblem * b
+
