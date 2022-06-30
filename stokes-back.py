@@ -4,7 +4,7 @@ from netgen.csg import *
 from prol import *
 from mymg import *
 from ngsolve.la import EigenValues_Preconditioner
-from ngsolve.krylovspace import CGSolver,
+from ngsolve.krylovspace import CGSolver
 
 import time as timeit
 
