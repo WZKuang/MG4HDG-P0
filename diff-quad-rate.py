@@ -3,7 +3,7 @@ from netgen.geom2d import unit_square
 from netgen.csg import *
 import matplotlib.pyplot as plt
 from prol import *
-from prol.mymg import *
+from mymg import *
 from ngsolve.la import EigenValues_Preconditioner
 from ngsolve.krylovspace import CGSolver
 

@@ -2,8 +2,6 @@ from ngsolve import *
 from netgen.geom2d import SplineGeometry, unit_square
 from netgen.csg import *
 from prol import *
-
-import mymg
 from mymg import *
 from ngsolve.la import EigenValues_Preconditioner
 from ngsolve.krylovspace import CGSolver, MinResSolver, GMResSolver
@@ -11,7 +9,7 @@ import sys
 import time as timeit
 
 # ============ parameters ===========
-c_vis, c_div = 1, 1e2
+c_vis, c_div = 1, 1e4
 
 dim = 2  # int(sys.argv[1])
 ns = 2  # int(sys.argv[2]) #1 #number of smoothers
@@ -379,9 +377,23 @@ def SolveBVP(level):
 
 
 SolveBVP(0)
-prev_uErr = sqrt(Integrate((uh - u_exact) * (uh - u_exact), mesh))
-prev_LErr = sqrt(Integrate(InnerProduct((Lh - L_exact), (Lh - L_exact)), mesh))
-prev_divErr = sqrt(Integrate(div(uh) * div(uh), mesh))
+print('=====================')
+print(
+    f"DIM: {dim}, M_ndof: {M.ndof * dim}, sum_ndof: {sum(fes.FreeDofs())} c_low: {c_lo:.1E}")
+print('=====================')
+print(f'level: {0}')
+L2_uErr = sqrt(Integrate((uh - u_exact) * (uh - u_exact), mesh))
+L2_LErr = sqrt(Integrate(InnerProduct((Lh - L_exact), (Lh - L_exact)), mesh))
+L2_divErr = sqrt(Integrate(div(uh) * div(uh), mesh))
+print(f"uh L2-error: {L2_uErr:.3E}")
+print(f"Lh L2-error: {L2_LErr:.3E}")
+print(f'uh divErr: {L2_divErr:.1E}, 1/epsilon: {c_div:.1E}')
+print(f'uzawa solver: {bool(uzawa)}, uzIt: {uzIt}')
+print(f'Direct Solver: {bool(directSol)}')
+if not directSol: print(f"vertex-patch-GS steps: {ns}, var-V: {var}, W-cycle: {wc}")
+print('==============================')
+prev_uErr = L2_uErr
+prev_LErr = L2_LErr
 u_rate, L_rate = 0, 0
 level = 1
 while True:
@@ -396,11 +408,6 @@ while True:
         if (M.ndof * dim > maxdofs):
             print(M.ndof * dim)
             break
-        if level == 1:
-            print('=====================')
-            print(
-                f"DIM: {dim}, M_ndof: {M.ndof * dim}, sum_ndof: {sum(fes.FreeDofs())} c_low: {c_lo:.1E}")
-            print('=====================')
         print(f'level: {level}')
         SolveBVP(level)
         # ===== convergence check =====
@@ -409,9 +416,8 @@ while True:
         L2_uErr = sqrt(Integrate((uh - u_exact) * (uh - u_exact), mesh))
         L2_LErr = sqrt(Integrate(InnerProduct((Lh - L_exact), (Lh - L_exact)), mesh))
         L2_divErr = sqrt(Integrate(div(uh) * div(uh), mesh))
-        if level != 0:
-            u_rate = log(prev_uErr / L2_uErr) / log(meshRate)
-            L_rate = log(prev_LErr / L2_LErr) / log(meshRate)
+        u_rate = log(prev_uErr / L2_uErr) / log(meshRate)
+        L_rate = log(prev_LErr / L2_LErr) / log(meshRate)
         print(f"uh L2-error: {L2_uErr:.3E}, uh conv rate: {u_rate:.2E}")
         print(f"Lh L2-error: {L2_LErr:.3E}, Lh conv rate: {L_rate:.2E}")
         print(f'uh divErr: {L2_divErr:.1E}, 1/epsilon: {c_div:.1E}')
