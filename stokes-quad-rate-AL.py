@@ -358,7 +358,7 @@ def SolveBVP(level):
             gfu0.vec.data += inv * (f0.vec - MFesEmb @ p_M_mix.mat * p_prev.vec)
             p_prev.vec.data += c_div * (pMass_inv @ p_M_mix.mat.T @ MFesEmb.T * gfu0.vec.data)
             it = it + 1 if directSol else it + inv.iterations
-        it /= 3
+        it /= uzIt
         # p_prev -> gfu
         gfu.vec.data += pFesEmb * p_prev.vec
     else:
