@@ -1,0 +1,1 @@
+cmake ../ -DCMAKE_INSTALL_PREFIX=/home/gfu/NG/ngsolve-install-X  -DBUILD_NGSOLVE=OFF 

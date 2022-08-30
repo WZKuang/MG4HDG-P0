@@ -103,10 +103,10 @@ elif dim == 3:
     q_exact = CF((1 + 1/2 * sin(x) * sin(y)) * (16 * (y - y**2) * (z - z**2) * (1 - 2 * x), 16 * (x - x**2) * (z - z**2) * (1 - 2 * y), 
                   16 * (x - x**2) * (y - y**2) * (1 - 2 * z)))
 
-# a.Assemble()
-a_ax.Assemble()
+a.Assemble()
+# a_ax.Assemble()
 # =========preconditioner init==============
-pre = MultiGrid(a_ax.mat, prol, nc=M.ndof,
+pre = MultiGrid(a.mat, prol, nc=M.ndof,
                 coarsedofs=fes.FreeDofs(True), w1=0.3, 
                 nsmooth=smStep, sm=smType, var=False)
 
@@ -118,7 +118,7 @@ def SolveBVP():
     fes.Update()
     gfu.Update()
     a.Assemble()
-    a_ax.Assemble()
+    # a_ax.Assemble()
     f.Assemble()
     if mesh.ne > ne:
         et.Update()
@@ -129,7 +129,7 @@ def SolveBVP():
         # point
         else:
             pp = [fes.FreeDofs(True), M.ndof, [], fes.FreeDofs(True)]
-        pre.Update(a_ax.mat, pp)
+        pre.Update(a.mat, pp)
     
     lams = EigenValues_Preconditioner(mat=a.mat, pre=pre)
     inv = CGSolver(a.mat, pre, printing=False, tol=1e-8, maxiter=100)

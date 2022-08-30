@@ -5,6 +5,7 @@ Numerical experiments code of multigrid (MG) preconditioners for condensd lowest
 + **Netgen/NGSolve**: version: 6.2.2105-289-g53df468f0, website: ngsolve.org.
 
 ## Files:
++ **prol**: NGSolve add on for intergrid transfer of hybrid facet space, needs to be built and installed.
 + **mymg.py**: Multigrid method class, head file.
 + **diff-quad-rate.py**: MG preconditioned CG solver for condensed HDG-P0 for reaction-diffusion equations with known solution.
 + **diff-Chip.py**: MG preconditioned CG solver for condensed HDG-P0 for reaction-diffusion equations with with jump coefficients.

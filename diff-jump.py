@@ -109,7 +109,7 @@ a_ax = BilinearForm(fes, symmetric=False, condense=True)
 
 # one heat conductivity coefficient per sub-domain
 lam = CoefficientFunction([1, 1000, 10])
-alpha = CoefficientFunction([1, 1000, 10])  
+alpha = 1
 c_rac = CoefficientFunction([rac_cof, rac_cof, rac_cof])
 
 if mesh.dim == 3:
@@ -144,10 +144,10 @@ else:
 # heat-source in inner subdomain
 f = LinearForm(fes)
 f += CoefficientFunction([0, 0, 1])*v * dx
-# a.Assemble()
-a_ax.Assemble()
+a.Assemble()
+# a_ax.Assemble()
 # =========preconditioner init==============
-pre = MultiGrid(a_ax.mat, prol, nc=M.ndof,
+pre = MultiGrid(a.mat, prol, nc=M.ndof,
                 coarsedofs=fes.FreeDofs(True), w1=0.6, 
                 nsmooth=smStep, sm="gs", var=False)
 
@@ -159,7 +159,7 @@ def SolveBVP():
     fes.Update()
     gfu.Update()
     a.Assemble()
-    a_ax.Assemble()
+    # a_ax.Assemble()
     f.Assemble()
     if mesh.ne > ne:
         et.Update()
@@ -170,7 +170,7 @@ def SolveBVP():
         # point
         else:
             pp = [fes.FreeDofs(True), M.ndof, [], fes.FreeDofs(True)]
-        pre.Update(a_ax.mat, pp)
+        pre.Update(a.mat, pp)
     
     lams = EigenValues_Preconditioner(mat=a.mat, pre=pre)
     inv = CGSolver(a.mat, pre, printing=False, tol=1e-8, maxiter=80)

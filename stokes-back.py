@@ -117,10 +117,10 @@ elif mesh.dim == 3:
                                                                  intrules={TRIG: ir})
 
 f = LinearForm(fes)
-# a.Assemble()
-a_ax.Assemble()
+a.Assemble()
+# a_ax.Assemble()
 # jacobi smoother
-pre = MultiGrid(a_ax.mat, prol, nc=M.ndof,
+pre = MultiGrid(a.mat, prol, nc=M.ndof,
                 coarsedofs=fes.FreeDofs(True), w1=0.8,
                 nsmooth=ns, sm="gs", var=var,
                 he=True, dim=dim, wcycle=wc, js=js)
@@ -142,7 +142,7 @@ def SolveBVP(level):
     fes.Update()
     gfu.Update()
     a.Assemble()
-    a_ax.Assemble()
+    # a_ax.Assemble()
     f.Assemble()
     t1 = timeit.time()
 
@@ -157,11 +157,11 @@ def SolveBVP(level):
         for j in range(dim):
             pdofs[j * M.ndof:(j + 1) * M.ndof] = inner
         # he_prol
-        pp.append(a_ax.mat.Inverse(pdofs, inverse="sparsecholesky"))
+        pp.append(a.mat.Inverse(pdofs, inverse="sparsecholesky"))
         # bk smoother
-        bjac = et.CreateSmoother(a_ax, {"blocktype": "vertexpatch"})
+        bjac = et.CreateSmoother(a, {"blocktype": "vertexpatch"})
         pp.append(bjac)
-        pre.Update(a_ax.mat, pp)
+        pre.Update(a.mat, pp)
     t2 = timeit.time()
     # estimate condition number
     lams = EigenValues_Preconditioner(mat=a.mat, pre=pre)
