@@ -1,6 +1,7 @@
 # MG4HDG-P0
 Numerical experiments code of multigrid (MG) preconditioners for condensd lowest-order HDG schemes with projected jumps (HDG-P0) for the reaction-diffusion equations and the generalized Stokes equations
 
+Link to the paper: https://arxiv.org/abs/2208.14418
 ## Requirements:
 + **Netgen/NGSolve**: version: 6.2.2105-289-g53df468f0, website: ngsolve.org.
 
