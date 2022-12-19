@@ -3,6 +3,7 @@ from netgen.geom2d import SplineGeometry, unit_square
 from netgen.csg import *
 from prol import *
 from mymg import *
+from myIterSolver import IterSolver
 from ngsolve.la import EigenValues_Preconditioner
 from ngsolve.krylovspace import CGSolver, MinResSolver, GMResSolver
 import sys
@@ -11,11 +12,15 @@ import time as timeit
 # ============ parameters ===========
 c_vis, c_div = 1, 1e4
 
-dim = 2  # int(sys.argv[1])
-ns = 2  # int(sys.argv[2]) #1 #number of smoothers
-c_lo = 10  # int(sys.argv[3])
-var = 1  # int(sys.argv[4]) #True
-wc = 0  # int(sys.argv[5]) #False
+if len(sys.argv) < 7:
+    print('Not enough arguments: dim + sm steps + c_low + var-V? + W-cycle? + precond?')
+    exit(1)
+dim = int(sys.argv[1])
+ns = int(sys.argv[2]) #1 #number of smoothers
+c_lo = float(sys.argv[3])
+var = bool(int(sys.argv[4]))
+wc = bool(int(sys.argv[5]))
+precond = bool(int(sys.argv[6]))
 
 uzawa = True  # whether to use AL-Uzawa or saddle point prob solver for aux operator
 uzIt = 3
@@ -26,8 +31,8 @@ if dim == 2:
     mesh = Mesh(unit_square.GenerateMesh(maxh=1 / 4))
     maxdofs = 1e5
 elif dim == 3:
-    mesh = Mesh(unit_cube.GenerateMesh(maxh=1 / 3))
-    maxdofs = 1e5
+    mesh = Mesh(unit_cube.GenerateMesh(maxh=1 / 4))
+    maxdofs = 2e7
 
 ne = mesh.ne
 
@@ -270,116 +275,124 @@ else:
                     he=True, dim=dim, wcycle=wc, he0=he0)
 
 def SolveBVP(level):
-    t0 = timeit.time()
-    fes.Update(); fes0.Update()
-    gfu.Update(); gfu0.Update()
-    a.Assemble(); a0.Assemble()
-    f.Assemble(); f0.Assemble()
+    with TaskManager():
+        t0 = timeit.time()
+        fes.Update(); fes0.Update()
+        gfu.Update(); gfu0.Update()
+        a.Assemble(); a0.Assemble()
+        f.Assemble(); f0.Assemble()
 
-    Q.Update(); MTmp.Update()
-    p_M_mix.Assemble()
-    pMass.Assemble()
-    pMass_inv = pMass.mat.CreateSmoother()
-    MFesPdt.Assemble(); fesMass.Assemble()
-    fesMass_inv = fesMass.mat.CreateSmoother()
-    # embedding mat: M * dim -> fes
-    MFesEmb = fesMass_inv @ MFesPdt.mat
-    # embedding mat: p -> fes
-    pFesEmb = Embedding(fes.ndof, fes.Range(2)) if dim == 2 else Embedding(fes.ndof, fes.Range(3))
+        Q.Update(); MTmp.Update()
+        p_M_mix.Assemble()
+        pMass.Assemble()
+        pMass_inv = pMass.mat.CreateSmoother()
+        MFesPdt.Assemble(); fesMass.Assemble()
+        fesMass_inv = fesMass.mat.CreateSmoother()
+        # embedding mat: M * dim -> fes
+        MFesEmb = fesMass_inv @ MFesPdt.mat
+        # embedding mat: p -> fes
+        pFesEmb = Embedding(fes.ndof, fes.Range(2)) if dim == 2 else Embedding(fes.ndof, fes.Range(3))
 
-    t1 = timeit.time()
+        t1 = timeit.time()
 
-    ## Update MG
-    # TODO: fix MG update for the condensed mixed formulation
-    # TODO: update Q_l^T in mixed MG-he, the bug in current setting is wrong uHe
-    if level > 0:
-        et.Update()
-        if uzawa:
-            pp = [fes0.FreeDofs(True)]
-            pp.append(M.ndof)
-            pdofs = BitArray(fes0.ndof)
-            pdofs[:] = 0
-            inner = prolM.GetInnerDofs(level)
-            for j in range(dim):
-                pdofs[j * M.ndof:(j + 1) * M.ndof] = inner
-            # he_prol
-            pp.append(a0.mat.Inverse(pdofs, inverse="sparsecholesky"))
-            # bk smoother
-            bjac = et.CreateSmoother(a0, {"blocktype": "vertexpatch"})
-            pp.append(bjac)
-            pre.Update(a0.mat, pp)
+        ## Update MG
+        # TODO: fix MG update for the condensed mixed formulation
+        # TODO: update Q_l^T in mixed MG-he, the bug in current setting is wrong uHe
+        if level > 0:
+            et.Update()
+            if uzawa:
+                pp = [fes0.FreeDofs(True)]
+                pp.append(M.ndof)
+                pdofs = BitArray(fes0.ndof)
+                pdofs[:] = 0
+                inner = prolM.GetInnerDofs(level)
+                for j in range(dim):
+                    pdofs[j * M.ndof:(j + 1) * M.ndof] = inner
+                # he_prol
+                pp.append(a0.mat.Inverse(pdofs, inverse="sparsecholesky"))
+                # bk smoother
+                # bjac = et.CreateSmoother(a0, {"blocktype": "vertexpatch"})
+                pp.append(fes0.CreateSmoothBlocks(vertex=True, globalDofs=True))
+                pre.Update(a0.mat, pp)
+            else:
+                pp = [fes0.FreeDofs(True)]
+                pp.append([M.ndof, Q0.ndof])
+                pdofs = BitArray(fes0.ndof)
+                pdofs[:] = 0
+                # FacetFESpace inner DOFs
+                inner = prolM.GetInnerDofs(level)
+                for j in range(dim):
+                    pdofs[j * M.ndof:(j + 1) * M.ndof] = inner
+                # pdofs[dim * M.ndof : dim * M.ndof + Q0.ndof] = 1
+                # difficult to directly get global Q_l^T DOFs
+                # he_prol, first perform he on M dofs, then p = Mass_p_inv * div(CR_M)
+                pTransf = c_div * pFesEmb @ pMass_inv @ p_M_mix.mat.T @ MFesEmb.T
+                pp.append([a0.mat.Inverse(pdofs, inverse="umfpack"), pTransf])
+                # pp.append(a0.mat.Inverse(pdofs, inverse="umfpack"))
+                # bk smoother
+                # bjac = et.CreateSmoother(a0, {"blocktype": "vertexpatch"})
+                pp.append(fes0.CreateSmoothBlocks(vertex=True, globalDofs=True))
+                pp.append(bjac)
+                pre.Update(a0.mat, pp)
+        t2 = timeit.time()
+        # estimate condition number
+        if directSol:
+            # lams = np.array([1, 1])
+            inv = a0.mat.Inverse(fes0.FreeDofs(True), inverse='umfpack')
         else:
-            pp = [fes0.FreeDofs(True)]
-            pp.append([M.ndof, Q0.ndof])
-            pdofs = BitArray(fes0.ndof)
-            pdofs[:] = 0
-            # FacetFESpace inner DOFs
-            inner = prolM.GetInnerDofs(level)
-            for j in range(dim):
-                pdofs[j * M.ndof:(j + 1) * M.ndof] = inner
-            # pdofs[dim * M.ndof : dim * M.ndof + Q0.ndof] = 1
-            # difficult to directly get global Q_l^T DOFs
-            # he_prol, first perform he on M dofs, then p = Mass_p_inv * div(CR_M)
-            pTransf = c_div * pFesEmb @ pMass_inv @ p_M_mix.mat.T @ MFesEmb.T
-            pp.append([a0.mat.Inverse(pdofs, inverse="umfpack"), pTransf])
-            # pp.append(a0.mat.Inverse(pdofs, inverse="umfpack"))
-            # bk smoother
-            bjac = et.CreateSmoother(a0, {"blocktype": "vertexpatch"})
-            pp.append(bjac)
-            pre.Update(a0.mat, pp)
-    t2 = timeit.time()
-    # estimate condition number
-    if directSol:
-        lams = np.array([1, 1])
-        inv = a0.mat.Inverse(fes0.FreeDofs(True), inverse='umfpack')
-    else:
-        # TODO: lams evaluation in mixed formulation?
+            # TODO: lams evaluation in mixed formulation?
+            if uzawa:
+                lams = EigenValues_Preconditioner(mat=a0.mat, pre=pre)
+                if precond:
+                    inv = CGSolver(a0.mat, pre, printrates=False, tol=1e-8, maxiter=100)
+                else:
+                    inv = IterSolver(mat=a0.mat, pre=pre, printrates=False, tol=1e-8, maxiter=200)
+            else:
+                # lams = np.array([1, 1])
+                inv = GMResSolver(a0.mat, pre, printrates=False, tol=1e-10, maxiter=500)
+                # inv = GMResSolver(a0.mat, a0.mat.Inverse(fes0.FreeDofs(True)), printrates=False, tol=1e-10, maxiter=500)
+        t21 = timeit.time()
+        # dirichlet BC
+        # homogeneous Dirichlet assumed
+        f.vec.data += a.harmonic_extension_trans * f.vec
+
+        f0.vec.data += a0.harmonic_extension_trans * f0.vec
+        it = 0
         if uzawa:
-            lams = EigenValues_Preconditioner(mat=a0.mat, pre=pre)
-            inv = CGSolver(a0.mat, pre, printrates=False, tol=1e-8, maxiter=100)
+            # Augmented Lagrangian with Uzawa solver
+            p_prev = GridFunction(Q)  # previous pressure solution
+            p_prev.vec[:] = 0  # initialize
+            for _ in range(uzIt):
+                # dirichlet BC, TODO: Dirichlet BC set after each iteration?
+                gfu0.vec.data[:] = 0
+                gfu0.vec.data += inv * (f0.vec - MFesEmb @ p_M_mix.mat * p_prev.vec)
+                p_prev.vec.data += c_div * (pMass_inv @ p_M_mix.mat.T @ MFesEmb.T * gfu0.vec.data)
+                it = it + 1 if directSol else it + inv.iterations
+            it /= uzIt
+            # p_prev -> gfu
+            gfu.vec.data += pFesEmb * p_prev.vec
         else:
-            lams = np.array([1, 1])
-            inv = GMResSolver(a0.mat, pre, printrates=False, tol=1e-10, maxiter=500)
-            # inv = GMResSolver(a0.mat, a0.mat.Inverse(fes0.FreeDofs(True)), printrates=False, tol=1e-10, maxiter=500)
-    t21 = timeit.time()
-    # dirichlet BC
-    # homogeneous Dirichlet assumed
-    f.vec.data += a.harmonic_extension_trans * f.vec
+            gfu0.vec.data += inv * f0.vec
+            it = 1 if directSol else inv.iterations
 
-    f0.vec.data += a0.harmonic_extension_trans * f0.vec
-    it = 0
-    if uzawa:
-        # Augmented Lagrangian with Uzawa solver
-        p_prev = GridFunction(Q)  # previous pressure solution
-        p_prev.vec[:] = 0  # initialize
-        for _ in range(uzIt):
-            # dirichlet BC, TODO: Dirichlet BC set after each iteration?
-            gfu0.vec.data[:] = 0
-            gfu0.vec.data += inv * (f0.vec - MFesEmb @ p_M_mix.mat * p_prev.vec)
-            p_prev.vec.data += c_div * (pMass_inv @ p_M_mix.mat.T @ MFesEmb.T * gfu0.vec.data)
-            it = it + 1 if directSol else it + inv.iterations
-        it /= uzIt
-        # p_prev -> gfu
-        gfu.vec.data += pFesEmb * p_prev.vec
-    else:
-        gfu0.vec.data += inv * f0.vec
-        it = 1 if directSol else inv.iterations
+        gfu.vec.data += Projector(fes0.FreeDofs(True), True) * gfu0.vec
+        gfu.vec.data += a.harmonic_extension * gfu.vec
+        gfu.vec.data += a.inner_solve * f.vec
+        t3 = timeit.time()
 
-    gfu.vec.data += Projector(fes0.FreeDofs(True), True) * gfu0.vec
-    gfu.vec.data += a.harmonic_extension * gfu.vec
-    gfu.vec.data += a.inner_solve * f.vec
-    t3 = timeit.time()
-
-    print(f"Time to find EIG Val: {t21 - t2:.1E}, MAX PREC LAM: {max(lams):.1E}; MIN PREC LAM: {min(lams):.1E}")
-    print("Avg IT: %2.0i" % (it), "cond: %.2e" % (max(lams) / min(lams)), "NDOFS: %.2e" % (
-        sum(fes.FreeDofs(True))),
-          "Assemble: %.2e Prec: %.2e Solve: %.2e" % (t1 - t0, t2 - t1, t3 - t21))
-
+        print(f"==> Time to find EIG Val: {t21 - t2:.1E}")
+        print(f"==> COND: {max(lams)/min(lams):.2e}, MAX PREC LAM: {max(lams):.1E}; MIN PREC LAM: {min(lams):.1E}")
+        print("==> Avg IT: %2.0i" % (it), "NDOFS: %.2e" % (
+            sum(M.FreeDofs(True))*mesh.dim),
+              "Assemble: %.2e Prec: %.2e Solve: %.2e" % (t1 - t0, t2 - t1, t3 - t21))
+        # import netgen.gui
+        # Draw(uh0, mesh)
+        # input('continue?')
 
 SolveBVP(0)
 print('=====================')
 print(
-    f"DIM: {dim}, M_ndof: {M.ndof * dim}, sum_ndof: {sum(fes.FreeDofs())} c_low: {c_lo:.1E}")
+    f"DIM: {dim}, c_low: {c_lo:.1E}")
 print('=====================')
 print(f'level: {0}')
 L2_uErr = sqrt(Integrate((uh - u_exact) * (uh - u_exact), mesh))
@@ -387,14 +400,15 @@ L2_LErr = sqrt(Integrate(InnerProduct((Lh - L_exact), (Lh - L_exact)), mesh))
 L2_divErr = sqrt(Integrate(div(uh) * div(uh), mesh))
 print(f"uh L2-error: {L2_uErr:.3E}")
 print(f"Lh L2-error: {L2_LErr:.3E}")
-print(f'uh divErr: {L2_divErr:.1E}, 1/epsilon: {c_div:.1E}')
+print(f'uh divErr: {L2_divErr:.3E}, 1/epsilon: {c_div:.1E}')
 print(f'uzawa solver: {bool(uzawa)}, uzIt: {uzIt}')
 print(f'Direct Solver: {bool(directSol)}')
 if not directSol: print(f"vertex-patch-GS steps: {ns}, var-V: {var}, W-cycle: {wc}")
 print('==============================')
 prev_uErr = L2_uErr
+prev_uDivErr = L2_divErr
 prev_LErr = L2_LErr
-u_rate, L_rate = 0, 0
+u_rate, uDiv_rate, L_rate = 0, 0, 0
 level = 1
 while True:
     with TaskManager():
@@ -402,7 +416,9 @@ while True:
             mesh.ngmesh.Refine()
         elif dim == 3:
             mesh.Refine(onlyonce=True)
+        meshRate = 2 if mesh.dim == 2 else sqrt(2)
         # mesh.ngmesh.Refine()
+        # meshRate = 2
         # exit if total global dofs exceed a tol
         M.Update()
         if (M.ndof * dim > maxdofs):
@@ -411,20 +427,20 @@ while True:
         print(f'level: {level}')
         SolveBVP(level)
         # ===== convergence check =====
-        meshRate = 2 if mesh.dim == 2 else sqrt(2)
-        # meshRate = 2
         L2_uErr = sqrt(Integrate((uh - u_exact) * (uh - u_exact), mesh))
         L2_LErr = sqrt(Integrate(InnerProduct((Lh - L_exact), (Lh - L_exact)), mesh))
         L2_divErr = sqrt(Integrate(div(uh) * div(uh), mesh))
         u_rate = log(prev_uErr / L2_uErr) / log(meshRate)
         L_rate = log(prev_LErr / L2_LErr) / log(meshRate)
+        uDiv_rate = log(prev_uDivErr / L2_divErr) / log(meshRate)
         print(f"uh L2-error: {L2_uErr:.3E}, uh conv rate: {u_rate:.2E}")
         print(f"Lh L2-error: {L2_LErr:.3E}, Lh conv rate: {L_rate:.2E}")
-        print(f'uh divErr: {L2_divErr:.1E}, 1/epsilon: {c_div:.1E}')
+        print(f'uh divErr: {L2_divErr:.3E}, uh div conv rate :{uDiv_rate:.2E}, 1/epsilon: {c_div:.1E}')
         print(f'uzawa solver: {bool(uzawa)}, uzIt: {uzIt}')
         print(f'Direct Solver: {bool(directSol)}')
         if not directSol: print(f"vertex-patch-GS steps: {ns}, var-V: {var}, W-cycle: {wc}")
         print('==============================')
         prev_uErr = L2_uErr
+        prev_uDivErr = L2_divErr
         prev_LErr = L2_LErr
         level += 1

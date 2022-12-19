@@ -6,14 +6,18 @@ from prol import *
 from mymg import *
 from ngsolve.la import EigenValues_Preconditioner
 from ngsolve.krylovspace import CGSolver
-
+from myIterSolver import IterSolver
 
 # ==========coefficients==========
 import sys
+if len(sys.argv) < 6:
+    print('Not enough arguments: dim + sm steps + block? + GS sm? + precond?')
+    exit(1)
 dim = int(sys.argv[1])
 smStep = int(sys.argv[2])
-block = int(sys.argv[3])
-gaussSm = int(sys.argv[4])
+block = bool(int(sys.argv[3]))
+gaussSm = bool(int(sys.argv[4]))
+precond = bool(int(sys.argv[5]))
 # ===============================
 smType = 'gs' if gaussSm else 'jc'
 if dim == 2:
@@ -107,7 +111,7 @@ a.Assemble()
 # a_ax.Assemble()
 # =========preconditioner init==============
 pre = MultiGrid(a.mat, prol, nc=M.ndof,
-                coarsedofs=fes.FreeDofs(True), w1=0.3, 
+                coarsedofs=fes.FreeDofs(True), w1=0.5, 
                 nsmooth=smStep, sm=smType, var=False)
 
 gfu = GridFunction(fes)
@@ -115,32 +119,36 @@ uhath, qh, uh = gfu.components
 # vtk = VTKOutput(ma=mesh,coefs=[uh], names=["sol"], filename="adpt"+str(dim),subdivision=0)
 
 def SolveBVP():
-    fes.Update()
-    gfu.Update()
-    a.Assemble()
-    # a_ax.Assemble()
-    f.Assemble()
-    if mesh.ne > ne:
-        et.Update()
-        # ===========point or block============
-        # block
-        if block:
-            pp = [fes.FreeDofs(True), M.ndof, [], VertexPatchBlocks(mesh,M)]
-        # point
+    with TaskManager():
+        fes.Update()
+        gfu.Update()
+        a.Assemble()
+        # a_ax.Assemble()
+        f.Assemble()
+        if mesh.ne > ne:
+            et.Update()
+            # ===========point or block============
+            # block
+            if block:
+                pp = [fes.FreeDofs(True), M.ndof, [], a.mat.CreateBlockSmoother(VertexPatchBlocks(mesh,M))]
+            # point
+            else:
+                pp = [fes.FreeDofs(True), M.ndof, [], fes.FreeDofs(True)]
+            pre.Update(a.mat, pp)
+        
+        lams = EigenValues_Preconditioner(mat=a.mat, pre=pre)
+        if precond:
+            inv = CGSolver(a.mat, pre, printing=False, tol=1e-8, maxiter=100)
         else:
-            pp = [fes.FreeDofs(True), M.ndof, [], fes.FreeDofs(True)]
-        pre.Update(a.mat, pp)
-    
-    lams = EigenValues_Preconditioner(mat=a.mat, pre=pre)
-    inv = CGSolver(a.mat, pre, printing=False, tol=1e-8, maxiter=100)
-    #inv = a.mat.Inverse(fes.FreeDofs(True))
-    f.vec.data += a.harmonic_extension_trans * f.vec  
-    gfu.vec.data = inv*f.vec
-    it = inv.iterations   
-    #it = 1
-    gfu.vec.data += a.harmonic_extension * gfu.vec 
-    gfu.vec.data += a.inner_solve * f.vec
-    print("IT: ", it, "cond: ", max(lams)/min(lams), "NDOFS: ", M.ndof)
+            inv = IterSolver(mat=a.mat, pre=pre, printrates=False, tol=1e-8, maxiter=200)
+        #inv = a.mat.Inverse(fes.FreeDofs(True))
+        f.vec.data += a.harmonic_extension_trans * f.vec  
+        gfu.vec.data = inv*f.vec
+        it = inv.iterations   
+        #it = 1
+        gfu.vec.data += a.harmonic_extension * gfu.vec 
+        gfu.vec.data += a.inner_solve * f.vec
+        print(f"Precond:{precond}, IT: {it}, cond: {max(lams)/min(lams):.2e}, NDOFS: {M.ndof}")
 
 l = []    # l = list of estimated total error
 
@@ -159,26 +167,27 @@ ft += (qh*n-lam*alpha/h*(uh-uhath))*rt*n*dx(element_boundary=True, intrules={SEG
 
 # a posterior error estimator
 def CalcError():
-    # compute the flux:
-    VT.Update()      
-    qhs.Update()
-    at.Assemble()
-    ft.Assemble()
-    qhs.vec.data = at.mat.Inverse()*ft.vec
-    
-    WT.Update()
-    uhs.Update()
-    uhs.Set(uh)
-    # compute estimator:
-    err = 1/lam*(qh-qhs)**2 + lam*(qh/lam-grad(uhs))**2
-    eta2 = Integrate(err, mesh, VOL, element_wise=True)
-    maxerr = max(eta2)
-    l.append ((fes.ndof, sqrt(sum(eta2))))
-#     print("ndof =", fes.ndof, " maxerr =", maxerr**0.5)
-    
-    # mark for refinement:
-    for el in mesh.Elements():
-        mesh.SetRefinementFlag(el, eta2[el.nr] > 0.25*maxerr)
+    with TaskManager():
+        # compute the flux:
+        VT.Update()      
+        qhs.Update()
+        at.Assemble()
+        ft.Assemble()
+        qhs.vec.data = at.mat.Inverse()*ft.vec
+        
+        WT.Update()
+        uhs.Update()
+        uhs.Set(uh)
+        # compute estimator:
+        err = 1/lam*(qh-qhs)**2 + lam*(qh/lam-grad(uhs))**2
+        eta2 = Integrate(err, mesh, VOL, element_wise=True)
+        maxerr = max(eta2)
+        l.append ((fes.ndof, sqrt(sum(eta2))))
+    #     print("ndof =", fes.ndof, " maxerr =", maxerr**0.5)
+        
+        # mark for refinement:
+        for el in mesh.Elements():
+            mesh.SetRefinementFlag(el, eta2[el.nr] > 0.25*maxerr)
 
 
 level = 0
@@ -197,13 +206,14 @@ with TaskManager():
     u_rate, q_rate = 0, 0
     while M.ndof < maxdofs:  
         # CalcError()
-        # if dim == 2:
-        #     mesh.ngmesh.Refine()
-        # else:
-        #     mesh.Refine(onlyonce = True)
-        mesh.ngmesh.Refine()
-        # NOTE the different refinement!!!
-        meshRate = 2 # if dim == 2 else sqrt(2)
+        if dim == 2:
+            mesh.ngmesh.Refine()
+            meshRate = 2
+        else:
+            mesh.Refine(onlyonce = True)
+            meshRate = sqrt(2)
+        # mesh.ngmesh.Refine()
+        # meshRate = 2
 
         level += 1
         SolveBVP()
