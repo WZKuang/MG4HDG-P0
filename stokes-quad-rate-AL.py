@@ -10,10 +10,10 @@ import sys
 import time as timeit
 
 # ============ parameters ===========
-c_vis, c_div = 1, 1e4
+c_vis, c_div = 1, 1e8
 
-if len(sys.argv) < 7:
-    print('Not enough arguments: dim + sm steps + c_low + var-V? + W-cycle? + precond?')
+if len(sys.argv) < 8:
+    print('Not enough arguments: dim + sm steps + c_low + var-V? + W-cycle? + precond? + gauss-Seidel?')
     exit(1)
 dim = int(sys.argv[1])
 ns = int(sys.argv[2]) #1 #number of smoothers
@@ -21,18 +21,19 @@ c_lo = float(sys.argv[3])
 var = bool(int(sys.argv[4]))
 wc = bool(int(sys.argv[5]))
 precond = bool(int(sys.argv[6]))
+gaussSm = bool(int(sys.argv[7]))
 
 uzawa = True  # whether to use AL-Uzawa or saddle point prob solver for aux operator
-uzIt = 3
+uzIt = 1
 directSol = False
 # ==================================
-
+smType = 'gs' if gaussSm else 'jc'
 if dim == 2:
     mesh = Mesh(unit_square.GenerateMesh(maxh=1 / 4))
-    maxdofs = 1e5
+    maxdofs = 2e6
 elif dim == 3:
-    mesh = Mesh(unit_cube.GenerateMesh(maxh=1 / 4))
-    maxdofs = 2e7
+    mesh = Mesh(unit_cube.GenerateMesh(maxh=1 / 2))
+    maxdofs = 1e6
 
 ne = mesh.ne
 
@@ -265,17 +266,18 @@ he0 = [a0.mat.Inverse(Mdof0, inverse="umfpack"), pTransf]
 # initialize MG preconditioner
 if uzawa:
     pre = MultiGrid(a0.mat, prolM, nc=M.ndof,
-                    coarsedofs=fes0.FreeDofs(True), w1=0.8,
-                    nsmooth=ns, sm="gs", var=var,
+                    coarsedofs=fes0.FreeDofs(True), w1=0.2,
+                    nsmooth=ns, sm=smType, var=var,
                     he=True, dim=dim, wcycle=wc, he0=he0)
 else:
     pre = MultiGrid(a0.mat, [prolM, prolP], nc=[M.ndof, Q0.ndof],
-                    coarsedofs=fes0.FreeDofs(True), w1=0.8,
-                    nsmooth=ns, sm="gs", var=var,
+                    coarsedofs=fes0.FreeDofs(True), w1=0.5,
+                    nsmooth=ns, sm=smType, var=var,
                     he=True, dim=dim, wcycle=wc, he0=he0)
 
 def SolveBVP(level):
     with TaskManager():
+    # with TaskManager(pajetrace=10**8):
         t0 = timeit.time()
         fes.Update(); fes0.Update()
         gfu.Update(); gfu0.Update()
@@ -332,7 +334,7 @@ def SolveBVP(level):
                 # bk smoother
                 # bjac = et.CreateSmoother(a0, {"blocktype": "vertexpatch"})
                 pp.append(fes0.CreateSmoothBlocks(vertex=True, globalDofs=True))
-                pp.append(bjac)
+                # pp.append(bjac)
                 pre.Update(a0.mat, pp)
         t2 = timeit.time()
         # estimate condition number
@@ -346,10 +348,11 @@ def SolveBVP(level):
                 if precond:
                     inv = CGSolver(a0.mat, pre, printrates=False, tol=1e-8, maxiter=100)
                 else:
-                    inv = IterSolver(mat=a0.mat, pre=pre, printrates=False, tol=1e-8, maxiter=200)
+                    inv = IterSolver(mat=a0.mat, pre=pre, printrates=False, tol=1e-8, atol=5e-7, maxiter=100, 
+                                     freedofs=fes0.FreeDofs(True))
             else:
                 # lams = np.array([1, 1])
-                inv = GMResSolver(a0.mat, pre, printrates=False, tol=1e-10, maxiter=500)
+                inv = GMResSolver(a0.mat, pre, printrates=False, tol=1e-8, maxiter=500)
                 # inv = GMResSolver(a0.mat, a0.mat.Inverse(fes0.FreeDofs(True)), printrates=False, tol=1e-10, maxiter=500)
         t21 = timeit.time()
         # dirichlet BC
@@ -381,8 +384,8 @@ def SolveBVP(level):
         t3 = timeit.time()
 
         print(f"==> Time to find EIG Val: {t21 - t2:.1E}")
-        print(f"==> COND: {max(lams)/min(lams):.2e}, MAX PREC LAM: {max(lams):.1E}; MIN PREC LAM: {min(lams):.1E}")
-        print("==> Avg IT: %2.0i" % (it), "NDOFS: %.2e" % (
+        print(f"==> Precond: {precond}, SM type: {smType}, COND: {max(lams)/min(lams):.2e}, MAX PREC LAM: {max(lams):.1E}; MIN PREC LAM: {min(lams):.1E}")
+        print("==> Avg IT: %2.0i" % (it), "Facet NDOFS: %.2e" % (
             sum(M.FreeDofs(True))*mesh.dim),
               "Assemble: %.2e Prec: %.2e Solve: %.2e" % (t1 - t0, t2 - t1, t3 - t21))
         # import netgen.gui
@@ -411,36 +414,35 @@ prev_LErr = L2_LErr
 u_rate, uDiv_rate, L_rate = 0, 0, 0
 level = 1
 while True:
-    with TaskManager():
-        if dim == 2:
-            mesh.ngmesh.Refine()
-        elif dim == 3:
-            mesh.Refine(onlyonce=True)
-        meshRate = 2 if mesh.dim == 2 else sqrt(2)
-        # mesh.ngmesh.Refine()
-        # meshRate = 2
-        # exit if total global dofs exceed a tol
-        M.Update()
-        if (M.ndof * dim > maxdofs):
-            print(M.ndof * dim)
-            break
-        print(f'level: {level}')
-        SolveBVP(level)
-        # ===== convergence check =====
-        L2_uErr = sqrt(Integrate((uh - u_exact) * (uh - u_exact), mesh))
-        L2_LErr = sqrt(Integrate(InnerProduct((Lh - L_exact), (Lh - L_exact)), mesh))
-        L2_divErr = sqrt(Integrate(div(uh) * div(uh), mesh))
-        u_rate = log(prev_uErr / L2_uErr) / log(meshRate)
-        L_rate = log(prev_LErr / L2_LErr) / log(meshRate)
-        uDiv_rate = log(prev_uDivErr / L2_divErr) / log(meshRate)
-        print(f"uh L2-error: {L2_uErr:.3E}, uh conv rate: {u_rate:.2E}")
-        print(f"Lh L2-error: {L2_LErr:.3E}, Lh conv rate: {L_rate:.2E}")
-        print(f'uh divErr: {L2_divErr:.3E}, uh div conv rate :{uDiv_rate:.2E}, 1/epsilon: {c_div:.1E}')
-        print(f'uzawa solver: {bool(uzawa)}, uzIt: {uzIt}')
-        print(f'Direct Solver: {bool(directSol)}')
-        if not directSol: print(f"vertex-patch-GS steps: {ns}, var-V: {var}, W-cycle: {wc}")
-        print('==============================')
-        prev_uErr = L2_uErr
-        prev_uDivErr = L2_divErr
-        prev_LErr = L2_LErr
-        level += 1
+    if dim == 2:
+        mesh.ngmesh.Refine()
+    elif dim == 3:
+        mesh.Refine(onlyonce=True)
+    meshRate = 2 if mesh.dim == 2 else sqrt(2)
+    # mesh.ngmesh.Refine()
+    # meshRate = 2
+    # exit if total global dofs exceed a tol
+    M.Update()
+    if (M.ndof * dim > maxdofs):
+        print(M.ndof * dim)
+        break
+    print(f'level: {level}')
+    SolveBVP(level)
+    # ===== convergence check =====
+    L2_uErr = sqrt(Integrate((uh - u_exact) * (uh - u_exact), mesh))
+    L2_LErr = sqrt(Integrate(InnerProduct((Lh - L_exact), (Lh - L_exact)), mesh))
+    L2_divErr = sqrt(Integrate(div(uh) * div(uh), mesh))
+    u_rate = log(prev_uErr / L2_uErr) / log(meshRate)
+    L_rate = log(prev_LErr / L2_LErr) / log(meshRate)
+    uDiv_rate = log(prev_uDivErr / L2_divErr) / log(meshRate)
+    print(f"uh L2-error: {L2_uErr:.3E}, uh conv rate: {u_rate:.2E}")
+    print(f"Lh L2-error: {L2_LErr:.3E}, Lh conv rate: {L_rate:.2E}")
+    print(f'uh divErr: {L2_divErr:.3E}, uh div conv rate :{uDiv_rate:.2E}, 1/epsilon: {c_div:.1E}')
+    print(f'uzawa solver: {bool(uzawa)}, uzIt: {uzIt}')
+    print(f'Direct Solver: {bool(directSol)}')
+    if not directSol: print(f"vertex-patch-GS steps: {ns}, var-V: {var}, W-cycle: {wc}")
+    print('==============================')
+    prev_uErr = L2_uErr
+    prev_uDivErr = L2_divErr
+    prev_LErr = L2_LErr
+    level += 1

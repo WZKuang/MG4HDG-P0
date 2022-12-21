@@ -22,10 +22,10 @@ precond = bool(int(sys.argv[5]))
 smType = 'gs' if gaussSm else 'jc'
 if dim == 2:
     mesh = Mesh(unit_square.GenerateMesh(maxh=1/4))
-    maxdofs=3e6
+    maxdofs=1e6
 else:
     mesh = Mesh(unit_cube.GenerateMesh(maxh=1/4))
-    maxdofs=3e6
+    maxdofs=1e6
 ne = mesh.ne
 
 
@@ -140,7 +140,7 @@ def SolveBVP():
         if precond:
             inv = CGSolver(a.mat, pre, printing=False, tol=1e-8, maxiter=100)
         else:
-            inv = IterSolver(mat=a.mat, pre=pre, printrates=False, tol=1e-8, maxiter=200)
+            inv = IterSolver(mat=a.mat, pre=pre, printrates=False, tol=1e-8, maxiter=200, freedofs=fes.FreeDofs(True))
         #inv = a.mat.Inverse(fes.FreeDofs(True))
         f.vec.data += a.harmonic_extension_trans * f.vec  
         gfu.vec.data = inv*f.vec
@@ -202,29 +202,28 @@ print(f"uh L2-error: {L2_uErr:.3E}")
 print(f"qh L2-error: {L2_qErr:.3E}")
 print('==============================')
 prev_uErr, prev_qErr = L2_uErr, L2_qErr
-with TaskManager():
-    u_rate, q_rate = 0, 0
-    while M.ndof < maxdofs:  
-        # CalcError()
-        if dim == 2:
-            mesh.ngmesh.Refine()
-            meshRate = 2
-        else:
-            mesh.Refine(onlyonce = True)
-            meshRate = sqrt(2)
-        # mesh.ngmesh.Refine()
-        # meshRate = 2
+u_rate, q_rate = 0, 0
+while M.ndof < maxdofs:  
+    # CalcError()
+    if dim == 2:
+        mesh.ngmesh.Refine()
+        meshRate = 2
+    else:
+        mesh.Refine(onlyonce = True)
+        meshRate = sqrt(2)
+    # mesh.ngmesh.Refine()
+    # meshRate = 2
 
-        level += 1
-        SolveBVP()
-        # ===== convergence check =====
-        L2_uErr =  sqrt(Integrate((uh - u_exact)*(uh - u_exact), mesh))
-        L2_qErr =  sqrt(Integrate((qh - q_exact)*(qh - q_exact), mesh))
-        u_rate = log(prev_uErr / L2_uErr) / log(meshRate)
-        q_rate = log(prev_qErr / L2_qErr) / log(meshRate)
-        prev_uErr, prev_qErr = L2_uErr, L2_qErr
-        print(f'level: {level}')
-        print(f"uh L2-error: {L2_uErr:.3E}, uh conv rate: {u_rate:.2E}")
-        print(f"qh L2-error: {L2_qErr:.3E}, qh conv rate: {q_rate:.2E}")
-        print('==============================')
+    level += 1
+    SolveBVP()
+    # ===== convergence check =====
+    L2_uErr =  sqrt(Integrate((uh - u_exact)*(uh - u_exact), mesh))
+    L2_qErr =  sqrt(Integrate((qh - q_exact)*(qh - q_exact), mesh))
+    u_rate = log(prev_uErr / L2_uErr) / log(meshRate)
+    q_rate = log(prev_qErr / L2_qErr) / log(meshRate)
+    prev_uErr, prev_qErr = L2_uErr, L2_qErr
+    print(f'level: {level}')
+    print(f"uh L2-error: {L2_uErr:.3E}, uh conv rate: {u_rate:.2E}")
+    print(f"qh L2-error: {L2_qErr:.3E}, qh conv rate: {q_rate:.2E}")
+    print('==============================')
 
