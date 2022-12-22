@@ -25,12 +25,12 @@ class IterSolver(LinearSolver):
             d.data = proj * r
             prev_res_norm = res_norm
             res_norm = sqrt(InnerProduct(d, d))
-            if res_norm > prev_res_norm:
-                print('Iterative solver NOT CONVERGING!!! STOPPED!!!')
-                return
-            else:
-                # print(f'Converge rate: {res_norm / prev_res_norm}')
-                pass
+            # if res_norm > prev_res_norm:
+            #     print('Iterative solver NOT CONVERGING!!! STOPPED!!!')
+            #     return
+            # else:
+            #     # print(f'Converge rate: {res_norm / prev_res_norm}')
+            #     pass
             if self.CheckResidual(res_norm):
                 return
 

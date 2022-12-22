@@ -266,12 +266,12 @@ he0 = [a0.mat.Inverse(Mdof0, inverse="umfpack"), pTransf]
 # initialize MG preconditioner
 if uzawa:
     pre = MultiGrid(a0.mat, prolM, nc=M.ndof,
-                    coarsedofs=fes0.FreeDofs(True), w1=0.2,
+                    coarsedofs=fes0.FreeDofs(True), w1=0.4,
                     nsmooth=ns, sm=smType, var=var,
                     he=True, dim=dim, wcycle=wc, he0=he0)
 else:
     pre = MultiGrid(a0.mat, [prolM, prolP], nc=[M.ndof, Q0.ndof],
-                    coarsedofs=fes0.FreeDofs(True), w1=0.5,
+                    coarsedofs=fes0.FreeDofs(True), w1=0.2,
                     nsmooth=ns, sm=smType, var=var,
                     he=True, dim=dim, wcycle=wc, he0=he0)
 
@@ -348,7 +348,7 @@ def SolveBVP(level):
                 if precond:
                     inv = CGSolver(a0.mat, pre, printrates=False, tol=1e-8, maxiter=100)
                 else:
-                    inv = IterSolver(mat=a0.mat, pre=pre, printrates=False, tol=1e-8, atol=5e-7, maxiter=100, 
+                    inv = IterSolver(mat=a0.mat, pre=pre, printrates=False, tol=1e-8, atol=5e-7, maxiter=200, 
                                      freedofs=fes0.FreeDofs(True))
             else:
                 # lams = np.array([1, 1])

@@ -2,7 +2,7 @@ from ngsolve import *
 from netgen.geom2d import SplineGeometry
 import matplotlib.pyplot as plt
 from prol import *
-from prol.mymg import *
+from mymg import *
 from ngsolve.la import EigenValues_Preconditioner
 from ngsolve.krylovspace import CGSolver
 
@@ -73,19 +73,25 @@ def MakeGeometry3D():
 
 # ==========coefficients==========
 import sys
+if len(sys.argv) < 5:
+    print("NOT ENOUGH ARGUMENTS!!! dim + sm steps + block? + low order coef")
+    exit(1)
 dim = int(sys.argv[1])
 smStep = int(sys.argv[2])
-block = int(sys.argv[3])
+block = bool(int(sys.argv[3]))
 rac_cof = int(sys.argv[4])
+drawResults = True
+adaptive = True
 # ===============================
+maxLevel = 25
 if dim == 2:
     mesh = Mesh(MakeGeometry().GenerateMesh(maxh=1/4))
     index = 1
-    maxdofs=3e6
+    maxdofs=1e6
 else:
     mesh = Mesh(MakeGeometry3D().GenerateMesh(maxh=1/4))
     index = 12
-    maxdofs=3e6
+    maxdofs=5e6
 ne = mesh.ne
 
 # HDG
@@ -156,31 +162,37 @@ uhath, qh, uh = gfu.components
 # vtk = VTKOutput(ma=mesh,coefs=[uh], names=["sol"], filename="adpt"+str(dim),subdivision=0)
 
 def SolveBVP():
-    fes.Update()
-    gfu.Update()
-    a.Assemble()
-    # a_ax.Assemble()
-    f.Assemble()
-    if mesh.ne > ne:
-        et.Update()
-        # ===========point or block============
-        # block
-        if block:
-            pp = [fes.FreeDofs(True), M.ndof, [], VertexPatchBlocks(mesh,M)]
-        # point
-        else:
-            pp = [fes.FreeDofs(True), M.ndof, [], fes.FreeDofs(True)]
-        pre.Update(a.mat, pp)
-    
-    lams = EigenValues_Preconditioner(mat=a.mat, pre=pre)
-    inv = CGSolver(a.mat, pre, printing=False, tol=1e-8, maxiter=80)
-#     inv = a.mat.Inverse(fes.FreeDofs(True))
-    f.vec.data += a.harmonic_extension_trans * f.vec  
-    gfu.vec.data = inv*f.vec
-    it = inv.iterations   
-    gfu.vec.data += a.harmonic_extension * gfu.vec 
-    gfu.vec.data += a.inner_solve * f.vec
-    print("IT: ", it, "cond: ", max(lams)/min(lams), "NDOFS: ", M.ndof)
+    with TaskManager():
+        fes.Update()
+        gfu.Update()
+        a.Assemble()
+        # a_ax.Assemble()
+        f.Assemble()
+        if mesh.ne > ne:
+            et.Update()
+            # ===========point or block============
+            # block
+            if block:
+                pp = [fes.FreeDofs(True), M.ndof, [], VertexPatchBlocks(mesh,M)]
+            # point
+            else:
+                pp = [fes.FreeDofs(True), M.ndof, [], fes.FreeDofs(True)]
+            pre.Update(a.mat, pp)
+        
+        lams = EigenValues_Preconditioner(mat=a.mat, pre=pre)
+        inv = CGSolver(a.mat, pre, printing=False, tol=1e-8, maxiter=80)
+    #     inv = a.mat.Inverse(fes.FreeDofs(True))
+        f.vec.data += a.harmonic_extension_trans * f.vec  
+        gfu.vec.data = inv*f.vec
+        it = inv.iterations   
+        gfu.vec.data += a.harmonic_extension * gfu.vec 
+        gfu.vec.data += a.inner_solve * f.vec
+        print(f"IT: {it}, cond: {max(lams)/min(lams):.2e}, Facet DOFS: {M.ndof}")
+        
+        if drawResults:
+            import netgen.gui
+            Draw(Norm(uh), mesh, 'primal norm')
+            input('continue?')
 
 l = []    # l = list of estimated total error
 
@@ -214,25 +226,34 @@ def CalcError():
     eta2 = Integrate(err, mesh, VOL, element_wise=True)
     maxerr = max(eta2)
     l.append ((fes.ndof, sqrt(sum(eta2))))
-#     print("ndof =", fes.ndof, " maxerr =", maxerr**0.5)
+    print(f"ndof = {fes.ndof}, global dofs: {sum(fes.FreeDofs(True))}  maxerr = {maxerr**0.5:.2e}")
     
     # mark for refinement:
     for el in mesh.Elements():
-        mesh.SetRefinementFlag(el, eta2[el.nr] > 0.25*maxerr)
+        mesh.SetRefinementFlag(el, eta2[el.nr] > 0.25 * maxerr)
 
-# SolveBVP()
-with TaskManager():
-    level = 1
-    print('==============================')
-    print(f'DIM: {dim}, Smooth Steps: {smStep}, Block GS: {block}, Reaction Coef: {rac_cof}')
-    print('==============================')
-    while M.ndof < maxdofs:  
-        # CalcError()
-        # mesh.Refine()
-        if dim == 2:
-            mesh.ngmesh.Refine()
+
+print('==============================')
+print(f'DIM: {dim}, Smooth Steps: {smStep}, Block GS: {block}, Reaction Coef: {rac_cof}')
+print('==============================')
+level = 0
+SolveBVP()
+while M.ndof < maxdofs and level < maxLevel:  
+    level += 1
+    print('===============')
+    print(f'Level: {level}')
+    if adaptive:  CalcError()
+    # mesh.Refine()
+    if dim == 2:
+        if adaptive:
+            mesh.Refine()
         else:
-            mesh.Refine(onlyonce = True)
-        level += 1
-        SolveBVP()
+            mesh.ngmesh.Refine()
+    else:
+        mesh.Refine(onlyonce=True)
+        # if adaptive:
+        #     mesh.Refine()
+        # else:
+        #     mesh.Refine(onlyonce = True)
+    SolveBVP()
 

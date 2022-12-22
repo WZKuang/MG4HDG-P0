@@ -25,7 +25,7 @@ js = False   # THIS IS A HACK # Nope #
 
 if dim == 2:
     mesh = Mesh(unit_square.GenerateMesh(maxh=1/4))
-    maxdofs=3e6
+    maxdofs=1e6
     c0 = 0.3826
 else:
     mesh = Mesh(unit_cube.GenerateMesh(maxh=1/2))

@@ -18,6 +18,8 @@ smStep = int(sys.argv[2])
 block = bool(int(sys.argv[3]))
 gaussSm = bool(int(sys.argv[4]))
 precond = bool(int(sys.argv[5]))
+drawResults = False
+adaptive = False
 # ===============================
 smType = 'gs' if gaussSm else 'jc'
 if dim == 2:
@@ -140,7 +142,8 @@ def SolveBVP():
         if precond:
             inv = CGSolver(a.mat, pre, printing=False, tol=1e-8, maxiter=100)
         else:
-            inv = IterSolver(mat=a.mat, pre=pre, printrates=False, tol=1e-8, maxiter=200, freedofs=fes.FreeDofs(True))
+            inv = IterSolver(mat=a.mat, pre=pre, printrates=False, tol=1e-8, maxiter=200, 
+                             freedofs=fes.FreeDofs(True))
         #inv = a.mat.Inverse(fes.FreeDofs(True))
         f.vec.data += a.harmonic_extension_trans * f.vec  
         gfu.vec.data = inv*f.vec
@@ -149,6 +152,10 @@ def SolveBVP():
         gfu.vec.data += a.harmonic_extension * gfu.vec 
         gfu.vec.data += a.inner_solve * f.vec
         print(f"Precond:{precond}, IT: {it}, cond: {max(lams)/min(lams):.2e}, NDOFS: {M.ndof}")
+        if drawResults:
+            import netgen.gui
+            Draw(Norm(uh), mesh, 'primal norm')
+            input('continue?')
 
 l = []    # l = list of estimated total error
 
@@ -204,9 +211,12 @@ print('==============================')
 prev_uErr, prev_qErr = L2_uErr, L2_qErr
 u_rate, q_rate = 0, 0
 while M.ndof < maxdofs:  
-    # CalcError()
+    if adaptive:  CalcError()
     if dim == 2:
-        mesh.ngmesh.Refine()
+        if adaptive:
+            mesh.Refine()
+        else:
+            mesh.ngmesh.Refine()
         meshRate = 2
     else:
         mesh.Refine(onlyonce = True)

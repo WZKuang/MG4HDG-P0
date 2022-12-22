@@ -10,7 +10,6 @@ import time as timeit
 
 # ============ parameters ===========
 c_vis, c_div= 1, 1e8
-level = 0
 
 import sys
 dim = int(sys.argv[1]) #2
@@ -19,13 +18,16 @@ c_lo = int(sys.argv[3])
 var= int(sys.argv[4]) #True
 wc = int(sys.argv[5]) #False
 # ==================================
-adapt = False
+adapt = True
+drawResults = True
 js = False  # THIS IS A HACK # Nope #
 
 # === geometric setup === #
 L = 5
+maxLevel = 15
 if dim == 2:
     maxdofs = 3e6
+    c0 = 0.3826
     ## Backwards-facing step flow geo
     geo = SplineGeometry()
     pnts = [(0.5, 0), (L, 0), (L, 1), (0, 1), (0, 0.5), (0.5, 0.5)]
@@ -41,6 +43,7 @@ if dim == 2:
     uin = CoefficientFunction(16 * (1 - y) * (y - 0.5))
 else:
     maxdofs = 1e6
+    c0 = 0.241
     ## Backwards-facing step flow geo
     geo = CSGeometry()
 
@@ -138,58 +141,64 @@ else:
 #         filename="Stokes"+str(dim)+str(adapt),subdivision=0)
 
 def SolveBVP(level):
-    t0 = timeit.time()
-    fes.Update()
-    gfu.Update()
-    a.Assemble()
-    # a_ax.Assemble()
-    f.Assemble()
-    t1 = timeit.time()
+    with TaskManager():
+        t0 = timeit.time()
+        fes.Update()
+        gfu.Update()
+        a.Assemble()
+        # a_ax.Assemble()
+        f.Assemble()
+        t1 = timeit.time()
 
-    # print(f"Global DOFs: {sum(fes.FreeDofs(True))}, Vhat Dofs: {sum(M.FreeDofs()) * dim}")
-    ## Update MG
-    if level > 0:
-        et.Update()
-        pp = [fes.FreeDofs(True), M.ndof]
-        pdofs = BitArray(fes.ndof)
-        pdofs[:] = 0
-        inner = prol.GetInnerDofs(level)
-        for j in range(dim):
-            pdofs[j * M.ndof:(j + 1) * M.ndof] = inner
-        # he_prol
-        pp.append(a.mat.Inverse(pdofs, inverse="sparsecholesky"))
-        # bk smoother
-        bjac = et.CreateSmoother(a, {"blocktype": "vertexpatch"})
-        pp.append(bjac)
-        pre.Update(a.mat, pp)
-    t2 = timeit.time()
-    # estimate condition number
-    lams = EigenValues_Preconditioner(mat=a.mat, pre=pre)
-    #lams = np.array([1,1])
-    t21 = timeit.time()
-    inv = CGSolver(a.mat, pre, printing=False, tol=1e-8, maxiter=40)
-    # === dirichlet BC === #
-    if dim == 2:
-        gfu.components[0].Set(uin, definedon=mesh.Boundaries("inlet"))
-    else:
-        gfu.components[0].Set(uin, definedon=mesh.Boundaries("inlet"))
+        # print(f"Global DOFs: {sum(fes.FreeDofs(True))}, Vhat Dofs: {sum(M.FreeDofs()) * dim}")
+        ## Update MG
+        if level > 0:
+            et.Update()
+            pp = [fes.FreeDofs(True), M.ndof]
+            pdofs = BitArray(fes.ndof)
+            pdofs[:] = 0
+            inner = prol.GetInnerDofs(level)
+            for j in range(dim):
+                pdofs[j * M.ndof:(j + 1) * M.ndof] = inner
+            # he_prol
+            pp.append(a.mat.Inverse(pdofs, inverse="sparsecholesky"))
+            # bk smoother
+            bjac = et.CreateSmoother(a, {"blocktype": "vertexpatch"})
+            pp.append(bjac)
+            pre.Update(a.mat, pp)
+        t2 = timeit.time()
+        # estimate condition number
+        lams = EigenValues_Preconditioner(mat=a.mat, pre=pre)
+        #lams = np.array([1,1])
+        t21 = timeit.time()
+        inv = CGSolver(a.mat, pre, printing=False, tol=1e-8, maxiter=40)
+        # === dirichlet BC === #
+        if dim == 2:
+            gfu.components[0].Set(uin, definedon=mesh.Boundaries("inlet"))
+        else:
+            gfu.components[0].Set(uin, definedon=mesh.Boundaries("inlet"))
 
-    f.vec.data -= a.mat * gfu.vec
-    f.vec.data += a.harmonic_extension_trans * f.vec
-    
-    gfu.vec.data += inv * f.vec
-    it = inv.iterations
-    #gfu.vec.data += a.mat.Inverse(fes.FreeDofs(True))*f.vec
-    #it = 1
-    
-    gfu.vec.data += a.harmonic_extension * gfu.vec
-    gfu.vec.data += a.inner_solve * f.vec
-    t3 = timeit.time()
+        f.vec.data -= a.mat * gfu.vec
+        f.vec.data += a.harmonic_extension_trans * f.vec
+        
+        gfu.vec.data += inv * f.vec
+        it = inv.iterations
+        #gfu.vec.data += a.mat.Inverse(fes.FreeDofs(True))*f.vec
+        #it = 1
+        
+        gfu.vec.data += a.harmonic_extension * gfu.vec
+        gfu.vec.data += a.inner_solve * f.vec
+        t3 = timeit.time()
 
-    # print(f"Time to find EIG Val: {t21 - t2}, MAX PREC LAM: {max(lams)}; MIN PREC LAM: {min(lams)}")
-    print("IT: %2.0i" % (it), "cond: %.2e" % (max(lams) / min(lams)), "NDOFS: %.2e" % (
-        sum(fes.FreeDofs(True))),
-          "Assemble: %.2e Prec: %.2e Solve: %.2e" % (t1 - t0, t2 - t1, t3 - t21))
+        # print(f"Time to find EIG Val: {t21 - t2}, MAX PREC LAM: {max(lams)}; MIN PREC LAM: {min(lams)}")
+        print("IT: %2.0i" % (it), "cond: %.2e" % (max(lams) / min(lams)), "NDOFS: %.2e" % (
+            sum(fes.FreeDofs(True))),
+            "Assemble: %.2e Prec: %.2e Solve: %.2e" % (t1 - t0, t2 - t1, t3 - t21))
+        
+        if drawResults:
+            import netgen.gui
+            Draw(uh, mesh, 'velocity')
+            input('continue?')
 
 
 l = []  # l = list of estimated total error
@@ -222,57 +231,50 @@ ft += (Lh * n - c_vis * alpha / h * (uh - uhath)) * (rt * n) * dx(element_bounda
 
 # # a posterior error estimator
 def CalcError():
-    # compute the flux:
-    VT.Update()
-    Lh0.Update()
-    at.Assemble()
-    ft.Assemble()
-    Lh0.vec.data = at.mat.Inverse(inverse="sparsecholesky") * ft.vec
-
-    WT.Update()
-    uhs.Update()
-    uhs.Set(uh)
-    # compute estimator:
-    err = 1 / c_vis * InnerProduct(Lh - Lhs, Lh - Lhs) + c_vis * InnerProduct(Lh / c_vis - Grad(uhs),
-                                                                              Lh / c_vis - Grad(uhs))
-    err += 1 / c0 ** 2 * div(uhs) ** 2
-    eta2 = Integrate(err, mesh, VOL, element_wise=True)
-    maxerr = max(eta2)
-    l.append((fes.ndof, sqrt(sum(eta2))))
-    #     print("ndof =", fes.ndof, " maxerr =", maxerr**0.5)
-
-    # mark for refinement:
-    for el in mesh.Elements():
-        mesh.SetRefinementFlag(el, eta2[el.nr] > 0.25 * maxerr)
-
-
-# SolveBVP(0)
-level += 1
-
-while True:
     with TaskManager():
-        if adapt == True:
-            CalcError()
-            mesh.Refine()
-        else:
-            if dim ==3:
-                mesh.Refine(onlyonce=True)
-            else:
-                mesh.ngmesh.Refine()
-        # exit if total global dofs exceed a tol 
-        M.Update()
-        if level == 1:
-            print('=====================')
-            print(f"DIM: {dim}, Adapt: {adapt}, vertex-patch-GS steps: {ns}, var-V: {var}, W-cycle: {wc}, c_low: {c_lo:.1E}, eps: {c_div:.1E}")
-            print('=====================') 
-        SolveBVP(level)
-        #from ngsolve.webgui import Draw
-        # import netgen.gui
-        # Draw(uh, mesh, 'norm')
-        # input('continue?')
-        
-        if (M.ndof * dim > maxdofs):
-            print(M.ndof * dim)
-            break
-        level += 1
+        # compute the flux:
+        VT.Update()
+        Lh0.Update()
+        at.Assemble()
+        ft.Assemble()
+        Lh0.vec.data = at.mat.Inverse(inverse="sparsecholesky") * ft.vec
 
+        WT.Update()
+        uhs.Update()
+        uhs.Set(uh)
+        # compute estimator:
+        err = 1 / c_vis * InnerProduct(Lh - Lhs, Lh - Lhs) + c_vis * InnerProduct(Lh / c_vis - Grad(uhs),
+                                                                                Lh / c_vis - Grad(uhs))
+        # err += 1 / c0 ** 2 * div(uhs) ** 2
+        eta2 = Integrate(err, mesh, VOL, element_wise=True)
+        maxerr = max(eta2)
+        l.append((fes.ndof, sqrt(sum(eta2))))
+        #     print("ndof =", fes.ndof, " maxerr =", maxerr**0.5)
+
+        # mark for refinement:
+        for el in mesh.Elements():
+            mesh.SetRefinementFlag(el, eta2[el.nr] > 0.6 * maxerr)
+
+
+print('=====================')
+print(f"DIM: {dim}, Adapt: {adapt}, vertex-patch-GS steps: {ns}, var-V: {var}, W-cycle: {wc}, c_low: {c_lo:.1E}, eps: {c_div:.1E}")
+print('=====================') 
+SolveBVP(0)
+level = 0
+while level < maxLevel and M.ndof * dim < maxdofs:
+    level += 1
+    print('=========')
+    print(f'Level: {level}')
+    if adapt == True:
+        CalcError()
+    if dim == 3:
+        mesh.Refine(onlyonce=True)
+        # if adapt:
+        #     mesh.Refine()
+        # else:
+        #     mesh.Refine(onlyonce=True)
+    elif dim == 2:
+        if adapt:  mesh.Refine()
+        else: mesh.ngmesh.Refine()
+    # exit if total global dofs exceed a tol 
+    SolveBVP(level)
