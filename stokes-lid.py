@@ -170,29 +170,28 @@ def SolveBVP(level):
 # SolveBVP(0)
 level = 1
 while True:
-    with TaskManager():
-        if adapt==True:
-            mesh.Refine()
+    if adapt==True:
+        mesh.Refine()
+    else:
+        if dim == 3:
+            mesh.Refine(onlyonce = True)
         else:
-            if dim == 3:
-                mesh.Refine(onlyonce = True)
-            else:
-                mesh.ngmesh.Refine()
-        # exit if total global dofs exceed a tol 
-        M.Update()
-        if (M.ndof*dim > maxdofs):
-            #print(M.ndof*dim)
-            break
-        if level==1:
-            print('=====================')
-            print(f"DIM: {dim}, Adapt: {adapt}, vertex-patch-GS steps: {ns}, var-V: {var}, W-cycle: {wc}, c_low: {c_lo:.1E}, eps: {c_div:.1E}")
-            print('=====================')
-        SolveBVP(level)
-        # from ngsolve.webgui import Draw
-        # import netgen.gui
-        # Draw(uh, mesh, 'norm')
-        # input('continue?')
-        level +=1
+            mesh.ngmesh.Refine()
+    # exit if total global dofs exceed a tol 
+    M.Update()
+    if (M.ndof*dim > maxdofs):
+        #print(M.ndof*dim)
+        break
+    if level==1:
+        print('=====================')
+        print(f"DIM: {dim}, Adapt: {adapt}, vertex-patch-GS steps: {ns}, var-V: {var}, W-cycle: {wc}, c_low: {c_lo:.1E}, eps: {c_div:.1E}")
+        print('=====================')
+    SolveBVP(level)
+    # from ngsolve.webgui import Draw
+    # import netgen.gui
+    # Draw(uh, mesh, 'norm')
+    # input('continue?')
+    level +=1
 
 
 

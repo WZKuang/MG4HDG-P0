@@ -104,7 +104,7 @@ elif dim == 3:
           + 32 * (x - x**2) * (z - z**2) * v
           - 8 * sin(x) * (x - x**2) * (z - z**2) * (cos(y) * (1 - 2 * y) - 2 * sin(y)) * v
           + 32 * (x - x**2) * (y - y**2) * v
-          + 16 * sin(x) * sin(y) * (x - x**2) * (y - y**2) * v) * dx(intrules = {TRIG:ir_c})
+          + 16 * sin(x) * sin(y) * (x - x**2) * (y - y**2) * v) * dx(intrules = {QUAD:ir_c})
     u_exact = 16 * x * (1- x) * y * (1 - y) * z * (1 - z)
     q_exact = CF((1 + 1/2 * sin(x) * sin(y)) * (16 * (y - y**2) * (z - z**2) * (1 - 2 * x), 16 * (x - x**2) * (z - z**2) * (1 - 2 * y), 
                   16 * (x - x**2) * (y - y**2) * (1 - 2 * z)))

@@ -24,7 +24,7 @@ js = False  # THIS IS A HACK # Nope #
 
 # === geometric setup === #
 L = 5
-maxLevel = 15
+maxLevel = 25
 if dim == 2:
     maxdofs = 3e6
     c0 = 0.3826
@@ -197,7 +197,7 @@ def SolveBVP(level):
         
         if drawResults:
             import netgen.gui
-            Draw(uh, mesh, 'velocity')
+            Draw(Norm(uh), mesh, 'velocity norm')
             input('continue?')
 
 
@@ -253,7 +253,7 @@ def CalcError():
 
         # mark for refinement:
         for el in mesh.Elements():
-            mesh.SetRefinementFlag(el, eta2[el.nr] > 0.6 * maxerr)
+            mesh.SetRefinementFlag(el, eta2[el.nr] > 0.75 * maxerr)
 
 
 print('=====================')
