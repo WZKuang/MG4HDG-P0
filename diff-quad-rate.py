@@ -47,8 +47,6 @@ n = specialcf.normal(mesh.dim)
 h = specialcf.mesh_size
 alpha = 1
 a = BilinearForm(fes, symmetric=False, condense=True)
-# non-variant coefficient auxiliary operator
-a_ax = BilinearForm(fes, symmetric=False, condense=True)
 (uhat, q, u),(vhat,r, v) = fes.TnT()  
 
 # set diffusion and reaction coeff to be 1
@@ -60,12 +58,10 @@ if mesh.dim == 3:
     ir_c = IntegrationRule(points = [(1/3, 1/3, 0), (1/3, 0, 1/3), (0, 1/3, 1/3), (1/3, 1/3, 1/3)],
                            weights = [1/16, 1/16, 1/16, 1/16])
     a += (1/lam * q * r + c_rac * u * v) * dx(intrules = {QUAD:ir_c})
-    a_ax += (1/lam * q * r) * dx(intrules = {QUAD:ir_c})
 elif mesh.dim == 2:
     ir_c = IntegrationRule(points = [(0.5, 0), (0, 0.5), (0.5, 0.5)],
                            weights= [1/6, 1/6, 1/6])
     a += (1/lam * q * r + c_rac * u * v) * dx(intrules = {TRIG:ir_c})
-    a_ax += (1/lam * q * r) * dx(intrules = {TRIG:ir_c})
 # for auxiliary operator, one-point integration
 # on boundaries to replace reaction integration term over elements
 if mesh.dim ==2:
@@ -73,17 +69,10 @@ if mesh.dim ==2:
     a += (-uhat*r*n+q*n*vhat
           + lam*alpha/h*(u-uhat)*(v-vhat))*dx(element_boundary=True,
                                          intrules={SEGM:ir})
-    a_ax += (c_rac * h / 3 * uhat * vhat
-             -uhat*r*n+q*n*vhat
-          + lam*alpha/h*(u-uhat)*(v-vhat))*dx(element_boundary=True,
-                                          intrules={SEGM:ir})
+
 else:
     ir = IntegrationRule(TRIG, 1)
     a += (-uhat*r*n+q*n*vhat
-          + lam*alpha/h*(u-uhat)*(v-vhat))*dx(element_boundary=True,
-                                          intrules={TRIG:ir})
-    a_ax += (c_rac * h / 4 * uhat * vhat
-             -uhat*r*n+q*n*vhat
           + lam*alpha/h*(u-uhat)*(v-vhat))*dx(element_boundary=True,
                                           intrules={TRIG:ir})
 # heat-source in inner subdomain
@@ -110,7 +99,6 @@ elif dim == 3:
                   16 * (x - x**2) * (y - y**2) * (1 - 2 * z)))
 
 a.Assemble()
-# a_ax.Assemble()
 # =========preconditioner init==============
 pre = MultiGrid(a.mat, prol, nc=M.ndof,
                 coarsedofs=fes.FreeDofs(True), w1=0.5, 
@@ -125,7 +113,6 @@ def SolveBVP():
         fes.Update()
         gfu.Update()
         a.Assemble()
-        # a_ax.Assemble()
         f.Assemble()
         if mesh.ne > ne:
             et.Update()
@@ -221,8 +208,6 @@ while M.ndof < maxdofs:
     else:
         mesh.Refine(onlyonce = True)
         meshRate = sqrt(2)
-    # mesh.ngmesh.Refine()
-    # meshRate = 2
 
     level += 1
     SolveBVP()

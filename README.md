@@ -7,9 +7,11 @@ Link to the paper: https://arxiv.org/abs/2208.14418
 
 ## Files:
 + **prol**: NGSolve add on for intergrid transfer of hybrid facet space, needs to be built and installed.
-+ **mymg.py**: Multigrid method class, head file.
-+ **diff-quad-rate.py**: MG preconditioned CG solver for condensed HDG-P0 for reaction-diffusion equations with known solution.
-+ **diff-Chip.py**: MG preconditioned CG solver for condensed HDG-P0 for reaction-diffusion equations with with jump coefficients.
-+ **stokes-quad-rate.py**: MG preconditioned CG solver for the augmented Lagrangian Uzawa iteration method to solve the condensed HDG-P0 for generalized Stokes equations with known solution.
-+ **stokes-lid.py**: MG preconditioned CG solver, one-time augmented Lagrangian Uzawa iteration to solve the lid-driven cavity problems.
-+ **stokes-back.py**: MG preconditioned CG solver, one-time augmented Lagrangian Uzawa iteration to solve the backward-facing step flow problems.
++ **mymg.py**: Multigrid method class.
++ **myIterSolver.py**: Iteration solver class.
++ **diff-quad-rate.py**: Solve HDG-P0 for reaction-diffusion equations with known solution.
++ **diff-jump.py**: Solve HDG-P0 for reaction-diffusion equations with jump coefficients on the coarsest mesh.
++ **diff-chess.py**: Solve HDG-P0 for reaction-diffusion equations with jump coefficients on the finest mesh in 2D.
++ **stokes-quad-rate.py**: Solve HDG-P0 for the generalized Stokes equations with known solution.
++ **stokes-lid.py**: One-time augmented Lagrangian Uzawa iteration to solve the lid-driven cavity problems.
++ **stokes-back.py**: One-time augmented Lagrangian Uzawa iteration to solve the backward-facing step flow problem.

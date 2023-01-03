@@ -80,10 +80,10 @@ dim = int(sys.argv[1])
 smStep = int(sys.argv[2])
 block = bool(int(sys.argv[3]))
 rac_cof = int(sys.argv[4])
-drawResults = True
+drawResults = False
 adaptive = True
 # ===============================
-maxLevel = 25
+maxLevel = 15
 if dim == 2:
     mesh = Mesh(MakeGeometry().GenerateMesh(maxh=1/4))
     index = 1
@@ -109,8 +109,6 @@ else:
 n = specialcf.normal(mesh.dim) 
 h = specialcf.mesh_size
 a = BilinearForm(fes, symmetric=False, condense=True)
-# non-variant coefficient auxiliary operator
-a_ax = BilinearForm(fes, symmetric=False, condense=True)
 (uhat, q, u),(vhat,r, v) = fes.TnT()  
 
 # one heat conductivity coefficient per sub-domain
@@ -122,20 +120,14 @@ if mesh.dim == 3:
     ir_c = IntegrationRule(points = [(1/3, 1/3, 0), (1/3, 0, 1/3), (0, 1/3, 1/3), (1/3, 1/3, 1/3)],
                            weights = [1/16, 1/16, 1/16, 1/16])
     a += (1/lam * q * r + c_rac * u * v) * dx(intrules = {QUAD:ir_c})
-    a_ax += (1/lam * q * r) * dx(intrules = {QUAD:ir_c})
 elif mesh.dim == 2:
     ir_c = IntegrationRule(points = [(0.5, 0), (0, 0.5), (0.5, 0.5)],
                            weights= [1/6, 1/6, 1/6])
     a += (1/lam * q * r + c_rac * u * v) * dx(intrules = {TRIG:ir_c})
-    a_ax += (1/lam * q * r) * dx(intrules = {TRIG:ir_c})
 
 if mesh.dim ==2:
     ir = IntegrationRule(SEGM, 1) 
     a += (-uhat*r*n+q*n*vhat
-          + lam*alpha/h*(u-uhat)*(v-vhat))*dx(element_boundary=True,
-                                          intrules={SEGM:ir})
-    a_ax += (c_rac * h / 3 * uhat * vhat
-             -uhat*r*n+q*n*vhat
           + lam*alpha/h*(u-uhat)*(v-vhat))*dx(element_boundary=True,
                                           intrules={SEGM:ir})
 else:
@@ -143,15 +135,11 @@ else:
     a += (-uhat*r*n+q*n*vhat
           + lam*alpha/h*(u-uhat)*(v-vhat))*dx(element_boundary=True,
                                           intrules={TRIG:ir})
-    a_ax += (c_rac * h / 4 * uhat * vhat
-             -uhat*r*n+q*n*vhat
-          + lam*alpha/h*(u-uhat)*(v-vhat))*dx(element_boundary=True,
-                                          intrules={TRIG:ir})
+
 # heat-source in inner subdomain
 f = LinearForm(fes)
 f += CoefficientFunction([0, 0, 1])*v * dx
 a.Assemble()
-# a_ax.Assemble()
 # =========preconditioner init==============
 pre = MultiGrid(a.mat, prol, nc=M.ndof,
                 coarsedofs=fes.FreeDofs(True), w1=0.6, 
@@ -166,7 +154,6 @@ def SolveBVP():
         fes.Update()
         gfu.Update()
         a.Assemble()
-        # a_ax.Assemble()
         f.Assemble()
         if mesh.ne > ne:
             et.Update()
@@ -191,8 +178,10 @@ def SolveBVP():
         
         if drawResults:
             import netgen.gui
-            Draw(Norm(uh), mesh, 'primal norm')
+            Draw(uh, mesh, 'primal')
             input('continue?')
+        
+        return it
 
 l = []    # l = list of estimated total error
 
@@ -237,6 +226,7 @@ print('==============================')
 print(f'DIM: {dim}, Smooth Steps: {smStep}, Block GS: {block}, Reaction Coef: {rac_cof}')
 print('==============================')
 level = 0
+itList = []
 SolveBVP()
 while M.ndof < maxdofs and level < maxLevel:  
     level += 1
@@ -255,5 +245,5 @@ while M.ndof < maxdofs and level < maxLevel:
         #     mesh.Refine()
         # else:
         #     mesh.Refine(onlyonce = True)
-    SolveBVP()
-
+    itList.append(SolveBVP())
+print(itList)

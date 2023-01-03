@@ -3,3 +3,4 @@ __pycache__
 ng*.html
 ng*.trace
 job*
+test.*

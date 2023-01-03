@@ -313,8 +313,7 @@ def SolveBVP(level):
                 # he_prol
                 pp.append(a0.mat.Inverse(pdofs, inverse="sparsecholesky"))
                 # bk smoother
-                # bjac = et.CreateSmoother(a0, {"blocktype": "vertexpatch"})
-                pp.append(fes0.CreateSmoothBlocks(vertex=True, globalDofs=True))
+                pp.append(et.CreateSmoother(a0, {"blocktype": "vertexpatch"}))
                 pre.Update(a0.mat, pp)
             else:
                 pp = [fes0.FreeDofs(True)]
